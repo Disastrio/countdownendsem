@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Countdown + Madrix Rain</title>
+    <style>
+        :root {
+            --bg: #000;
+            --fg: #0f0;
+            --panel-bg: rgba(0, 0, 0, 0.55);
+        }
+
+        html,
+        body {
+            height: 100%;
+            margin: 0;
+            background: var(--bg);
+            color: var(--fg);
+            font-family: "Courier New", Courier, monospace;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        /* Canvas covers entire background */
+        canvas#madrix {
+            position: fixed;
+            inset: 0;
+            z-index: 0;
+            display: block;
+        }
+
+        /* Centered countdown panel sits above the canvas */
+        .center {
+            position: relative;
+            z-index: 2;
+            min-width: 280px;
+            text-align: center;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            height: 100vh;
+            pointer-events: none;
+            /* so clicks pass through if needed */
+        }
+
+        .panel {
+            padding: 20px 28px;
+            border-radius: 12px;
+            background: var(--panel-bg);
+            backdrop-filter: blur(4px);
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.02);
+            pointer-events: auto;
+        }
+
+        h1 {
+            margin: 0 0 10px 0;
+            letter-spacing: 4px;
+            color: var(--fg);
+            font-size: 1rem;
+            opacity: 0.95;
+        }
+
+        #timer {
+            color: var(--fg);
+            font-size: clamp(2rem, 6vw, 4rem);
+            font-weight: 700;
+            margin: 0;
+            line-height: 1;
+            text-shadow: 0 2px 8px rgba(0, 255, 70, 0.06);
+        }
+
+        /* small foot note at bottom (optional) */
+        .foot {
+            margin-top: 14px;
+            font-size: 0.8rem;
+            opacity: 0.7;
+            letter-spacing: 0.6px;
+        }
+
+        /* Make sure mobile has breathing room */
+        @media (max-width:420px) {
+            .panel {
+                padding: 14px 18px;
+            }
+
+            h1 {
+                font-size: 0.9rem;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Canvas for the Madrix/Matrix rain -->
+    <canvas id="madrix" aria-hidden="true"></canvas>
+
+    <!-- Visible countdown -->
+    <div class="center">
+        <div class="panel" role="region" aria-label="Countdown">
+            <h1>COUNTDOWN</h1>
+            <div id="timer" aria-live="polite">Loading...</div>
+            <div class="foot">Target: 16 December 2025 09:00</div>
+        </div>
+    </div>
+
+    <script>
+        /***** COUNTDOWN LOGIC (unchanged, robust) *****/
+        const targetDate = new Date("2025-12-16T00:09:00").getTime();
+
+        function updateTimer() {
+            const now = Date.now();
+            const diff = targetDate - now;
+
+            const el = document.getElementById("timer");
+
+            if (diff <= 0) {
+                el.innerText = "TIME'S UP";
+                clearInterval(timerLoop);
+                return;
+            }
+
+            const days = Math.floor(diff / 86400000);
+            const hours = Math.floor((diff % 86400000) / 3600000);
+            const minutes = Math.floor((diff % 3600000) / 60000);
+            const seconds = Math.floor((diff % 60000) / 1000);
+
+            el.innerText = `${days}d ${String(hours).padStart(2, '0')}h ${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`;
+        }
+
+        const timerLoop = setInterval(updateTimer, 1000);
+        updateTimer();
+
+        /***** MADRIX / MATRIX RAIN BACKGROUND *****/
+        (function madrix() {
+            const canvas = document.getElementById('madrix');
+            const ctx = canvas.getContext('2d');
+
+            // Characters to use in the rain - mix of binary, hex, and code-like symbols
+            const chars = ('01▐▌░▒▓<>/{}[]()=+-*;:,._^%$#@!?<>|\\' +
+                'abcdef0123456789').split('');
+
+            // Tunable visual parameters
+            const fontSizeBase = 14;       // base font size in CSS pixels
+            const densityFactor = 0.5;     // 0.0 (sparse) to 1.0 (dense) -> lower = little rain
+            const fadeAlpha = 0.08;        // how fast trail fades (lower = longer trails)
+            const glowAlpha = 0.12;        // subtle glow on characters
+            const charOpacity = 0.95;      // character max opacity
+
+            let columns = []; // y positions for each column
+            let columnCount = 0;
+            let fontSize = fontSizeBase;
+
+            // device-pixel-ratio scaling for crispness
+            function resize() {
+                const dpr = Math.max(1, window.devicePixelRatio || 1);
+                const w = window.innerWidth;
+                const h = window.innerHeight;
+                canvas.width = Math.floor(w * dpr);
+                canvas.height = Math.floor(h * dpr);
+                canvas.style.width = w + 'px';
+                canvas.style.height = h + 'px';
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // work in CSS pixels
+
+                // adjust font size slightly by viewport width for a responsive look
+                const vw = Math.max(320, Math.min(w, 1920));
+                fontSize = Math.max(10, Math.round(fontSizeBase * (0.9 + (vw / 1920))));
+                ctx.font = fontSize + 'px monospace';
+
+                // compute columns: one column per char width * density factor
+                const charWidth = ctx.measureText('█').width || fontSize * 0.6;
+                columnCount = Math.floor((w / charWidth) * (0.35 + densityFactor * 0.65));
+                columnCount = Math.max(8, Math.min(columnCount, Math.floor(w / 8)));
+
+                columns = new Array(columnCount).fill(0).map(() => {
+                    // Start y randomly above the screen so first drops appear gradually
+                    return Math.random() * -1000;
+                });
+            }
+
+            // Draw loop
+            function step() {
+                // translucent black rectangle to fade trails
+                ctx.fillStyle = 'rgba(0, 0, 0,' + fadeAlpha + ')';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                // draw each column
+                const w = canvas.width / (window.devicePixelRatio || 1);
+                const h = canvas.height / (window.devicePixelRatio || 1);
+                const colWidth = w / columnCount;
+
+                for (let i = 0; i < columnCount; i++) {
+                    const x = i * colWidth + (colWidth - ctx.measureText('0').width) / 2;
+                    const y = columns[i];
+
+                    // pick a random character
+                    const ch = chars[Math.floor(Math.random() * chars.length)];
+                    // slight variation in opacity and green tone
+                    const green = Math.floor(120 + Math.random() * 120);
+                    ctx.fillStyle = `rgba(0, ${green}, 0, ${charOpacity})`;
+                    ctx.fillText(ch, x, y);
+
+                    // subtle brighter head occasionally
+                    if (Math.random() > 0.92) {
+                        ctx.fillStyle = `rgba(180, 255, 180, ${glowAlpha})`;
+                        ctx.fillText(ch, x, y);
+                    }
+
+                    // move drop down; speed depends on font size and a bit of randomness
+                    columns[i] = y + fontSize * (0.35 + Math.random() * 0.9);
+
+                    // reset column if it has passed the bottom with some randomness
+                    if (columns[i] > h + Math.random() * 1000) {
+                        columns[i] = Math.random() * -120;
+                    }
+                }
+
+                requestAnimationFrame(step);
+            }
+
+            // Kick off
+            window.addEventListener('resize', throttle(resize, 120));
+            resize();
+            requestAnimationFrame(step);
+
+            // Simple throttle
+            function throttle(fn, wait) {
+                let t = 0;
+                return function () {
+                    const now = Date.now();
+                    if (now - t > wait) {
+                        t = now;
+                        fn();
+                    }
+                };
+            }
+        })();
+    </script>
+</body>
+
+</html>
